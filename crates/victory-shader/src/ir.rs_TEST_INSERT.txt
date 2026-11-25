@@ -1,0 +1,80 @@
+//! Regression coverage for wave64 scalar values parked in VGPR lanes.
+
+use super::*;
+
+const S_ENDPGM: u32 = 0xBF81_0000;
+
+fn build_words(words: &[u32], wave64: bool) -> crate::ir::Program {
+    let code: Vec<u8> = words
+        .iter()
+        .flat_map(|word| word.to_le_bytes())
+        .collect();
+    crate::ir::build(&code, wave64, 8).unwrap()
+}
+
+fn parked_pair_restore_for_adjacent_saves_and_restores() {
+    let words = [
+        0xD761_0001, // v_writelane_b32 v1, s0, lane 3
+        0x0000_0000,
+        0xBE82_0387, // s_mov_b32 s2, 7 (interposed work)
+        0xD761_0001, // v_writelane_b32 v1, s1, lane 4
+        0x0000_0101,
+        0xD760_0000, // v_readlane_b32 s0, v1, lane 3
+        0x0000_0000,
+        0xD760_0001, // v_readlane_b32 s1, v1, lane 4
+        0x0000_0101,
+        S_ENDPGM,
+    ];
+
+    let program = build_words(&words, true);
+    let block = &program.blocks[0];
+    let parked_moves = block
+        .insts
+        .iter()
+        .filter(|inst| matches!(inst.name(), "s_mov_b32" | "s_mov_b64"))
+        .count();
+
+    assert!(parked_moves >= 2, "parked pair should restore around the lane reads: {:#?}", block.insts);
+    assert_eq!(
+        block
+            .insts
+            .iter()
+            .filter(|inst| matches!(inst.name(), "v_writelane_b32" | "v_readlane_b32"))
+            .count(),
+        0,
+        "parked lane instructions should be rewritten: {:#?}",
+        block.insts
+    );
+}
+
+#[test]
+fn parked_pair_restores_across_adjacent_saves_and_restores() {
+    parked_pair_restore_for_adjacent_saves_and_restores();
+}
+
+#[test]
+fn parked_pair_is_not_combined_when_intervening_code_uses_the_second_register() {
+    let words = [
+        0xD761_0001, // v_writelane_b32 v1, s0, lane 3
+        0x0000_0000,
+        0xD761_0001, // v_writelane_b32 v1, s1, lane 4
+        0x0000_0101,
+        0xBE83_0385, // s_mov_b32 s3, 5 (uses no parked half)
+        0xD760_0000, // v_readlane_b32 s0, v1, lane 3
+        0x0000_0000,
+        0xD760_0001, // v_readlane_b32 s1, v1, lane 4
+        0x0000_0101,
+        S_ENDPGM,
+    ];
+
+    let program = build_words(&words, true);
+    assert!(program
+        .blocks[0]
+        .insts
+        .iter()
+        .any(|inst| inst.name() == "v_writelane_b32"
+            || inst.name() == "v_readlane_b32"),
+        "a separate scalar restore should prevent unsafe pair folding: {:#?}",
+        program.blocks[0].insts
+    );
+}

@@ -1,0 +1,2 @@
+//! End-to-end tests of synthetic GFX10 VALU shaders lowered to DXIL.
+
