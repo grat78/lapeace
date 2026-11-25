@@ -206,6 +206,24 @@ impl Host {
                 });
             }
         }
+        /// Sanitizes root signature flags by stripping the NVIDIA-unsupported
+        /// bitmask 0xC01 (ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED | SAMPLER_HEAP_DIRECTLY_INDEXED).
+        /// The NVIDIA driver rejects this exact combination with "Unsupported bit-flag set (root signature flags c01)"
+        /// and "The parameter is incorrect. (0x80070057)".
+        fn sanitize_root_signature_flags(flags: D3D12_ROOT_SIGNATURE_FLAGS) -> D3D12_ROOT_SIGNATURE_FLAGS {
+            const UNSUPPORTED_BITMASK: u32 =
+                D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT.0 as u32
+                | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED.0 as u32
+                | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED.0 as u32; // 0xC01
+            let raw = flags.0 & !UNSUPPORTED_BITMASK;
+            D3D12_ROOT_SIGNATURE_FLAGS(raw)
+        }
+
+        let flags = sanitize_root_signature_flags(
+            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+                | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
+                | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED,
+        );
         let desc = D3D12_VERSIONED_ROOT_SIGNATURE_DESC {
             Version: D3D_ROOT_SIGNATURE_VERSION_1_1,
             Anonymous: D3D12_VERSIONED_ROOT_SIGNATURE_DESC_0 {
@@ -214,9 +232,7 @@ impl Host {
                     pParameters: params.as_ptr(),
                     NumStaticSamplers: samplers.len() as u32,
                     pStaticSamplers: samplers.as_ptr(),
-                    Flags: D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
-                        | D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED
-                        | D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED,
+                    Flags: flags,
                 },
             },
         };

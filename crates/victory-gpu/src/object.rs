@@ -78,6 +78,24 @@ pub(crate) extern "system" fn release(this: This) -> u32 {
     refs.load(Ordering::Relaxed)
 }
 
+/// Validates that a host object pointer is non-null and properly initialized
+/// before returning it to guest (title) code. Prevents null-pointer dereferences
+/// like the 0xc0000005 reading 0x68 crash.
+fn validate_host_object_ptr(ptr: This, kind: usize) -> bool {
+    if ptr.is_null() {
+        tracing::error!(object = KINDS[kind], "HLE object pointer is null - would cause guest crash");
+        return false;
+    }
+    // Check that the object header has a valid vtable pointer
+    // SAFETY: ptr is non-null per check above
+    let vtable = unsafe { *ptr.cast::<*const *const ()>() };
+    if vtable.is_null() {
+        tracing::error!(object = KINDS[kind], "HLE object has null vtable - would cause guest crash");
+        return false;
+    }
+    true
+}
+
 /// Answers an interface query (or any call handing out an object): a new
 /// reference to `found`, or null and `E_NOINTERFACE`.
 pub(crate) fn answer(kind: usize, iid: *const Iid, found: Option<This>, out: *mut This) -> HRESULT {
@@ -86,6 +104,12 @@ pub(crate) fn answer(kind: usize, iid: *const Iid, found: Option<This>, out: *mu
     }
     let hr = match found {
         Some(object) => {
+            // Validate the object before handing it to guest code
+            if !validate_host_object_ptr(object, kind) {
+                // SAFETY: checked non-null.
+                unsafe { out.write(std::ptr::null()) };
+                return E_FAIL;
+            }
             add_ref(object);
             // SAFETY: checked non-null; the title passes room for a pointer.
             unsafe { out.write(object) };
@@ -124,7 +148,15 @@ pub(crate) fn hand_out<T>(
         // Asked only whether creation would succeed.
         return S_FALSE;
     }
-    answer(kind, iid, Some(Box::into_raw(object).cast()), out)
+    let ptr = Box::into_raw(object).cast();
+    // Validate the newly created object before handing it to guest code
+    if !validate_host_object_ptr(ptr, kind) {
+        // Object validation failed; drop it and return error
+        // SAFETY: we just created this object, so it's valid to drop
+        unsafe { drop(Box::from_raw(ptr.cast_mut().cast::<T>())); }
+        return answer(kind, iid, None, out);
+    }
+    answer(kind, iid, Some(ptr), out)
 }
 
 /// Release for objects made by [`hand_out`]: the last reference frees it.

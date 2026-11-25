@@ -102,6 +102,11 @@ pub extern "system" fn serialize(
     let Some(&desc) = (unsafe { desc.as_ref() }) else {
         return E_INVALIDARG;
     };
+    // Defensive: validate output pointers before calling host function
+    if blob.is_null() {
+        tracing::error!("serialize: blob output pointer is null");
+        return E_POINTER;
+    }
     static FUNCTION: OnceLock<Option<usize>> = OnceLock::new();
     let Some(address) = host_export(&FUNCTION, c"D3D12SerializeRootSignature") else {
         tracing::warn!("no host d3d12.dll to serialize root signatures");
@@ -128,6 +133,11 @@ pub extern "system" fn serialize_versioned(
     let Some(&desc) = (unsafe { desc.as_ref() }) else {
         return E_INVALIDARG;
     };
+    // Defensive: validate output pointers before calling host function
+    if blob.is_null() {
+        tracing::error!("serialize_versioned: blob output pointer is null");
+        return E_POINTER;
+    }
     static FUNCTION: OnceLock<Option<usize>> = OnceLock::new();
     let Some(address) = host_export(&FUNCTION, c"D3D12SerializeVersionedRootSignature") else {
         tracing::warn!("no host d3d12.dll to serialize root signatures");
@@ -154,7 +164,13 @@ pub extern "system" fn create_deserializer(
     iid: *const Iid,
     out: *mut *mut c_void,
 ) -> HRESULT {
-    if blob.is_null() || out.is_null() {
+    if blob.is_null() || size == 0 || out.is_null() {
+        tracing::error!(
+            blob_null = blob.is_null(),
+            size_zero = size == 0,
+            out_null = out.is_null(),
+            "create_deserializer: invalid arguments"
+        );
         return E_INVALIDARG;
     }
     static FUNCTION: OnceLock<Option<usize>> = OnceLock::new();
@@ -183,7 +199,16 @@ pub(crate) extern "system" fn create(
     out: *mut This,
 ) -> HRESULT {
     if blob.is_null() || size == 0 {
+        tracing::error!("root::create: null blob or zero size");
         return E_INVALIDARG;
+    }
+    if iid.is_null() {
+        tracing::error!("root::create: null iid");
+        return E_INVALIDARG;
+    }
+    if out.is_null() {
+        // Title only asks if creation would succeed.
+        return S_FALSE;
     }
     // SAFETY: the title passes `size` bytes.
     let blob = unsafe { std::slice::from_raw_parts(blob, size) }.to_vec();

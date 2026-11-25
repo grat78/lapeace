@@ -848,6 +848,18 @@ impl State {
     /// False if the draw or dispatch must not run: a root SRV it reads
     /// could not be given a view.
     pub(crate) fn bind(&mut self, list: &HostList, p: &HostPipeline, compute: bool) -> bool {
+        // Validate that the host pipeline has valid root signature and pipeline state
+        // to prevent null-pointer dereferences (0xc0000005 reading 0x68)
+        if p.root.is_null() || p.pso.is_null() {
+            tracing::error!(
+                pipeline = ?p.name,
+                compute,
+                root_null = p.root.is_null(),
+                pso_null = p.pso.is_null(),
+                "Host pipeline has null root signature or PSO; refusing to bind to prevent crash"
+            );
+            return false;
+        }
         let l = &list.list;
         // Heaps first: a root signature with directly indexed heaps must be
         // set after them.

@@ -536,8 +536,17 @@ pub(crate) extern "system" fn create_graphics(
 ) -> HRESULT {
     // SAFETY: the title passes a description (null is tolerated).
     let Some(desc) = (unsafe { desc.as_ref() }) else {
+        tracing::error!("create_graphics: null desc");
         return E_INVALIDARG;
     };
+    if iid.is_null() {
+        tracing::error!("create_graphics: null iid");
+        return E_INVALIDARG;
+    }
+    if out.is_null() {
+        // Title only asks if creation would succeed.
+        return S_FALSE;
+    }
     let stages = GRAPHICS_STAGES.iter().zip(&desc.stages);
     let shaders = stages.filter_map(|(s, c)| copy(s, c)).collect();
     hand_out(
@@ -558,8 +567,17 @@ pub(crate) extern "system" fn create_compute(
 ) -> HRESULT {
     // SAFETY: the title passes a description (null is tolerated).
     let Some(desc) = (unsafe { desc.as_ref() }) else {
+        tracing::error!("create_compute: null desc");
         return E_INVALIDARG;
     };
+    if iid.is_null() {
+        tracing::error!("create_compute: null iid");
+        return E_INVALIDARG;
+    }
+    if out.is_null() {
+        // Title only asks if creation would succeed.
+        return S_FALSE;
+    }
     hand_out(
         copy("compute", &desc.stage).into_iter().collect(),
         #[cfg(windows)]
@@ -630,9 +648,19 @@ pub(crate) extern "system" fn create_stream(
 ) -> HRESULT {
     // SAFETY: the title passes a description (null is tolerated).
     let Some(desc) = (unsafe { desc.as_ref() }) else {
+        tracing::error!("create_stream: null desc");
         return E_INVALIDARG;
     };
+    if iid.is_null() {
+        tracing::error!("create_stream: null iid");
+        return E_INVALIDARG;
+    }
+    if out.is_null() {
+        // Title only asks if creation would succeed.
+        return S_FALSE;
+    }
     if desc.stream.is_null() {
+        tracing::error!("create_stream: null stream pointer");
         return E_INVALIDARG;
     }
     let mut shaders = Vec::new();

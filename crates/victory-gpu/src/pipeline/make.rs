@@ -60,8 +60,15 @@ impl Pending {
     }
 
     fn make(&self) {
-        self.made
-            .get_or_init(|| HostPipeline::new(&self.shaders, self.graphics.as_deref()));
+        let host_pipeline = HostPipeline::new(&self.shaders, self.graphics.as_deref());
+        if host_pipeline.is_none() {
+            tracing::error!(
+                shaders = ?self.shaders,
+                "Host pipeline creation failed: shaders did not translate or host refused pipeline; "
+                "this will cause a null-pointer dereference if the title uses this pipeline"
+            );
+        }
+        self.made.get_or_init(|| host_pipeline);
         let (lock, done) = &DONE;
         let _held = lock.lock().unwrap_or_else(|e| e.into_inner());
         done.notify_all();
@@ -127,7 +134,16 @@ pub(crate) fn ready(p: &Arc<Pending>) -> Option<&HostPipeline> {
         start(p, REQUESTED);
         wait(p, crate::frame::current());
     }
-    p.made.get()?.as_ref()
+    let host_pipeline = p.made.get()?.as_ref();
+    if host_pipeline.is_none() {
+        tracing::error!(
+            key = %p.key,
+            shaders = ?p.shaders,
+            "Host pipeline is not available (creation failed or timed out); "
+            "draws/dispatches using this pipeline will be dropped to prevent null-pointer dereference"
+        );
+    }
+    host_pipeline
 }
 
 /// Makes `p` on this thread if it is not made yet (waiting for a worker
